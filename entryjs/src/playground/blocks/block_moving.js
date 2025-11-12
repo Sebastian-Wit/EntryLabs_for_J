@@ -17,6 +17,58 @@ module.exports = {
                 object.x = wall.left.x;
             }
         }
+        function getPictureById(sprite, id) {
+            // Make sure we grab the entity object itself
+            const entity = sprite.entity || sprite; 
+            if (!entity || !entity.pictures) {
+                console.warn("Entity or pictures missing:", entity);
+                return null;
+            }
+            return entity.pictures.find(pic => pic.id === id);
+        }
+
+        /**
+         * Toggles the walking animation for a sprite.
+         * Assumes the sprite has an `entity` and a `pictures` array in its sprite object.
+         * Swaps between the two pictures to simulate walking.
+         */
+        function toggleWalk(entryObject) {
+            if (!entryObject || !entryObject.pictures || entryObject.pictures.length < 2) {
+                console.warn("No pictures found on sprite:", entryObject?.id);
+                return;
+            }
+
+            // Find current picture index
+            const pictures = entryObject.pictures;
+            const currentIndex = pictures.findIndex(p => p.id === entryObject.selectedPicture.id);
+            const nextIndex = (currentIndex + 1) % pictures.length;
+            const nextPicture = pictures[nextIndex];
+
+            entryObject.selectedPicture = nextPicture;
+
+            // Update the visible image
+            entryObject.entity.setImage(nextPicture);
+            entryObject.updateThumbnailView?.();
+        }
+
+        
+
+        /**
+         * Resets walking animation to the default frame
+         */
+        function resetWalk(sprite) {
+            if (!sprite || !sprite.sprite || !sprite.sprite.pictures) return;
+
+            // Reset frame index
+            sprite.currentWalkFrame = 0;
+
+            // Set to first picture in array
+            const defaultPicture = sprite.sprite.pictures[0];
+            sprite.setImage(defaultPicture);
+            console.log("resetWalk: reset to default frame", defaultPicture.id);
+        }
+
+
 
         return {
             move_direction: {
@@ -80,6 +132,9 @@ module.exports = {
                                         Math.PI
                                 )
                     );
+                    const object = Entry.container.getObject(sprite.parent.id);
+                    toggleWalk(object); //Animate sprite Walking
+
                     if (sprite.brush && !sprite.brush.stop) {
                         sprite.brush.lineTo(sprite.getX(), sprite.getY() * -1);
                     }
@@ -391,6 +446,8 @@ module.exports = {
                 func(sprite, script) {
                     const value = script.getNumberValue('VALUE', script);
                     sprite.setX(sprite.getX() + value);
+                    const object = Entry.container.getObject(sprite.parent.id);
+                    toggleWalk(object); //Animate sprite Walking
                     if (sprite.brush && !sprite.brush.stop) {
                         sprite.brush.lineTo(sprite.getX(), sprite.getY() * -1);
                     }
@@ -447,6 +504,8 @@ module.exports = {
                 func(sprite, script) {
                     const value = script.getNumberValue('VALUE', script);
                     sprite.setY(sprite.getY() + value);
+                    const object = Entry.container.getObject(sprite.parent.id);
+                    toggleWalk(object); //Animate sprite Walking
                     if (sprite.brush && !sprite.brush.stop) {
                         sprite.brush.lineTo(sprite.getX(), sprite.getY() * -1);
                     }
@@ -491,13 +550,15 @@ module.exports = {
     class: 'move_relative',
     isNotFor: [],
 
-    // 🧠 REPLACE ONLY THIS PART ↓
     func(sprite, script) {
         if (!script.isStart) {
             let [timeValue, xValue, yValue] = script.getValues(
                 ['VALUE1', 'VALUE2', 'VALUE3'],
                 script
             );
+            script.walkFrameCounter = 0; // counts frames for walk animation
+            script.walkFrameDelay = 60;   // number of frames to wait before toggling
+
 
             timeValue = Number(timeValue);
             xValue = Number(xValue);
@@ -527,6 +588,14 @@ module.exports = {
             sprite.setX(newX);
             sprite.setY(newY);
 
+            // Walk animation toggle slower
+            script.walkFrameCounter++;
+            if (script.walkFrameCounter >= script.walkFrameDelay) {
+                const object = Entry.container.getObject(sprite.parent.id);
+                toggleWalk(object); //Animate sprite Walking
+                script.walkFrameCounter = 0; // reset counter
+            }
+
             if (sprite.brush && !sprite.brush.stop) {
                 sprite.brush.lineTo(newX, -newY);
             }
@@ -535,15 +604,16 @@ module.exports = {
             }
 
             script.currentFrame++;
-            return script; // continue animation next frame
+            return script;
+
         } else {
             delete script.isStart;
             delete script.frameCount;
             delete script.currentFrame;
+            resetWalk(sprite); // reset walking animation
             return script.callReturn();
         }
     },
-    // 🧠 REPLACE ONLY THIS PART ↑
 
     syntax: { js: [], py: ['Entry.add_xy_for_sec(%2, %3, %1)'] },
 },
@@ -829,6 +899,7 @@ module.exports = {
                     } else {
                         delete script.isStart;
                         delete script.frameCount;
+                        resetWalk(sprite); // reset walking animation
                         return script.callReturn();
                     }
 
@@ -839,6 +910,32 @@ module.exports = {
                         dY /= script.frameCount;
                         sprite.setX(sprite.getX() + dX);
                         sprite.setY(sprite.getY() + dY);
+                        // walking animation toggle
+                        if (script.currentFrame === undefined) script.currentFrame = 0;
+                        if (sprite.currentWalkFrame === undefined) sprite.currentWalkFrame = 1;
+
+                        const entity = sprite.entity || sprite; // make sure we get the object with .pictures
+                        if (!entity.pictures) {
+                            console.warn("Pictures not found on sprite/entity", sprite, entity);
+                            return;
+                        }
+
+                        let picId = sprite.currentWalkFrame === 1 ? "vx80" : "4t48";
+                        let picture = entity.pictures.find(p => p.id === picId);
+
+                        if (picture) {
+                            sprite.setImage(picture); // pass the picture object
+                        // toggle walk frame every 2 frames
+                        if (script.currentFrame % 2 === 0) {
+                            sprite.currentWalkFrame = sprite.currentWalkFrame === 1 ? 2 : 1;
+                            let picId = sprite.currentWalkFrame === 1 ? "vx80" : "4t48";
+                            let picture = entity.pictures.find(p => p.id === picId);
+                            if (picture) sprite.setImage(picture);
+                        }
+                        } else {
+                            console.warn("Picture not found for id", picId);
+                        }
+
                         script.frameCount--;
                         if (sprite.brush && !sprite.brush.stop) {
                             sprite.brush.lineTo(sprite.getX(), sprite.getY() * -1);
@@ -846,6 +943,7 @@ module.exports = {
                         if (sprite.paint && !sprite.paint.stop) {
                             sprite.paint.lineTo(sprite.getX(), sprite.getY() * -1);
                         }
+                        script.currentFrame++;
                     }
                 },
                 syntax: { js: [], py: ['Entry.set_xy_for_sec(%2, %3, %1)'] },
@@ -1597,6 +1695,8 @@ module.exports = {
 
                     sprite.setX(sprite.getX() + value * Math.cos(((angle - 90) / 180) * Math.PI));
                     sprite.setY(sprite.getY() - value * Math.sin(((angle - 90) / 180) * Math.PI));
+                    const object = Entry.container.getObject(sprite.parent.id);
+                    toggleWalk(object); //Animate sprite Walking
                     if (sprite.brush && !sprite.brush.stop) {
                         sprite.brush.lineTo(sprite.getX(), sprite.getY() * -1);
                     }
